@@ -100,7 +100,14 @@ default_disks = '-f /dev/sda2,/dev/sdb2'
 
 # List of machines available to use as servers or clients; see
 # common.getHosts() for more information on how to set this variable.
-hosts = None
+hosts = []
+ids = [1, 2, 3, 4, 12, 14, 15, 16, 18, 19, 20, 21]
+for i in ids:
+    hosts.append((
+        'heming-rdma%d' % i,
+        '202.45.128.%d' % (159 + i),
+        i
+    ))
 
 class NoOpClusterHooks:
     def __init__(self):
