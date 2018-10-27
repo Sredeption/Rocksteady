@@ -13,24 +13,23 @@
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-import sys
-import os
-from common import *
 from subprocess import Popen, PIPE
 
-def getObjDir():
+from common import *
+
+def get_obj_dir():
     git_ref = Popen(['git', 'symbolic-ref', '-q', 'HEAD'], stdout=PIPE)
     sed = Popen(['sed', '-e', 's,refs/heads/,.,'], stdin=git_ref.stdout, stdout=PIPE)
     git_ref.stdout.close()
-    output,err = sed.communicate()
+    output, err = sed.communicate()
     return 'obj%s' % output.strip()
 
-def newWorkDir(host, workDir):
-    return Popen(['ssh', host, 'rm -rf %s && mkdir -p %s' % (workDir, workDir)])
+def new_work_dir(host, work_dir):
+    return Popen(['ssh', host, 'rm -rf %s && mkdir -p %s' % (work_dir, work_dir)])
 
-def install(host, workDir, rc_path, obj_dir):
-    binary_process = Popen(['scp', '-r', '%s/%s' % (rc_path, obj_dir), '%s:%s/obj' % (host, workDir)])
-    script_process = Popen(['scp', '-r', '%s/scripts' % rc_path, '%s:%s/scripts' % (host, workDir)])
+def install(host, work_dir, rc_path, obj_dir):
+    binary_process = Popen(['scp', '-r', '%s/%s' % (rc_path, obj_dir), '%s:%s/obj' % (host, work_dir)])
+    script_process = Popen(['scp', '-r', '%s/scripts' % rc_path, '%s:%s/scripts' % (host, work_dir)])
     return [binary_process, script_process]
 
 if __name__ == '__main__':
@@ -38,18 +37,18 @@ if __name__ == '__main__':
     script_path = os.path.split(os.path.realpath(__file__))[0]
     rc_path = script_path.split('/scripts')[0]
     print(rc_path)
-    obj_dir = getObjDir()
+    obj_dir = get_obj_dir()
     obj_path = '%s/%s' % (rc_path, obj_dir)
     print(script_path)
     print(obj_path)
-    
+
     hosts = getHosts()
-    setup_processes = [newWorkDir(name, install_path) for (name, ip, no) in hosts]
-    # watiing for directory setup
+    setup_processes = [new_work_dir(name, install_path) for (name, ip, no) in hosts]
+    # waiting for directory setup
     for p in setup_processes:
         p.wait()
     install_processes = [install(name, install_path, rc_path, obj_dir) for (name, ip, no) in hosts]
-    # watiing for install finish
+    # waiting for install finish
     for processes in install_processes:
         for p in processes:
             p.wait()
