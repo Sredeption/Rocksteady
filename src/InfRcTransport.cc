@@ -172,7 +172,10 @@ InfRcTransport::InfRcTransport(Context* context, const ServiceLocator *sl,
     , clientRxCq(NULL)
     , commonTxCq(NULL)
     , ibPhysicalPort(1)
+    , linkLayer(-1)
     , lid(0)
+    , gidIndex(-1)
+    , gid()
     , serverSetupSocket(-1)
     , clientSetupSocket(-1)
     , clientPort(0)
@@ -210,6 +213,8 @@ InfRcTransport::InfRcTransport(Context* context, const ServiceLocator *sl,
     }
 
     infiniband = realInfiniband.construct(ibDeviceName);
+    ibPhysicalPort = infiniband->getUpPort();
+    LOG(NOTICE, "Port %d is up", ibPhysicalPort);
 
     // Step 1:
     //  Set up the udp sockets we use for out-of-band infiniband handshaking.
@@ -295,6 +300,14 @@ InfRcTransport::InfRcTransport(Context* context, const ServiceLocator *sl,
 
     lid = infiniband->getLid(ibPhysicalPort);
     LOG(NOTICE, "Local Infiniband lid is %u", lid);
+
+    linkLayer = infiniband->getLinkLayer(ibPhysicalPort);
+
+    if (linkLayer == IBV_LINK_LAYER_ETHERNET) {
+        gidIndex = 0;
+        infiniband->getGid(ibPhysicalPort, gidIndex, &gid);
+        LOG(NOTICE, "Local Infiniband gid is %016lx:%016lx", gid.global.subnet_prefix, gid.global.interface_id);
+    }
 
     // create two shared receive queues. all client queue pairs use one and all
     // server queue pairs use the other. we post receive buffer work requests
@@ -747,7 +760,8 @@ InfRcTransport::clientTrySetupQueuePair(IpAddress& address)
     // Create a new QueuePair and send its parameters to the server so it
     // can create its qp and reply with its parameters.
     QueuePair *qp = infiniband->createQueuePair(IBV_QPT_RC,
-                                                ibPhysicalPort, clientSrq,
+                                                ibPhysicalPort, linkLayer,
+                                                gidIndex, clientSrq,
                                                 commonTxCq, clientRxCq,
                                                 MAX_TX_QUEUE_DEPTH,
                                                 MAX_SHARED_RX_QUEUE_DEPTH);
@@ -759,6 +773,7 @@ InfRcTransport::clientTrySetupQueuePair(IpAddress& address)
         QueuePairTuple outgoingQpt(downCast<uint16_t>(lid),
                                    qp->getLocalQpNumber(),
                                    qp->getInitialPsn(), nonce,
+                                   gid,
                                    name);
         QueuePairTuple incomingQpt;
         bool gotResponse;
@@ -841,6 +856,8 @@ InfRcTransport::ServerConnectHandler::handleFileEvent(int events)
     QueuePair *qp = transport->infiniband->createQueuePair(
             IBV_QPT_RC,
             transport->ibPhysicalPort,
+            transport->linkLayer,
+            transport->gidIndex,
             transport->serverSrq,
             transport->commonTxCq,
             transport->serverRxCq,
@@ -859,7 +876,8 @@ InfRcTransport::ServerConnectHandler::handleFileEvent(int events)
     // complete the initialisation.
     QueuePairTuple outgoingQpt(downCast<uint16_t>(transport->lid),
                                qp->getLocalQpNumber(),
-                               qp->getInitialPsn(), incomingQpt.getNonce());
+                               qp->getInitialPsn(), incomingQpt.getNonce(),
+                               transport->gid);
     len = sendto(transport->serverSetupSocket, &outgoingQpt,
             sizeof(outgoingQpt), 0, reinterpret_cast<sockaddr *>(&sin),
             sinlen);
