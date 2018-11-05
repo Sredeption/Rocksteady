@@ -66,11 +66,11 @@ Infiniband::dumpStats()
  * See QueuePair::QueuePair for parameter documentation.
  */
 Infiniband::QueuePair*
-Infiniband::createQueuePair(ibv_qp_type type, int ibPhysicalPort, ibv_srq *srq,
-                            ibv_cq *txcq, ibv_cq *rxcq, uint32_t maxSendWr,
+Infiniband::createQueuePair(ibv_qp_type type, int ibPhysicalPort, int linkLayer, int gidIndex,
+                            ibv_srq *srq, ibv_cq *txcq, ibv_cq *rxcq, uint32_t maxSendWr,
                             uint32_t maxRecvWr, uint32_t QKey)
 {
-    return new QueuePair(*this, type, ibPhysicalPort, srq, txcq, rxcq,
+    return new QueuePair(*this, type, ibPhysicalPort, linkLayer, gidIndex,srq, txcq, rxcq,
                          maxSendWr, maxRecvWr, QKey);
 }
 
@@ -116,6 +116,23 @@ Infiniband::wcStatusToString(int status)
     return lookup[status];
 }
 
+int Infiniband::getUpPort() {
+    ibv_port_attr ipa;
+    for (int port = 1; port <= 2; port++) {
+        int ret = ibv_query_port(device.ctxt, downCast<uint8_t>(port), &ipa);
+        if (ret) {
+            RAMCLOUD_LOG(ERROR, "ibv_query_port failed on port %u\n", port);
+            throw TransportException(HERE, ret);
+        }
+        if (ipa.state != IBV_PORT_DOWN)
+            return port;
+    }
+
+    RAMCLOUD_LOG(ERROR, "couldn't find up port\n");
+    throw TransportException(HERE, -1);
+}
+
+
 /**
  * Obtain the infiniband "local ID" of the device corresponding to
  * the provided context and port number.
@@ -138,6 +155,54 @@ Infiniband::getLid(int port)
         throw TransportException(HERE, ret);
     }
     return ipa.lid;
+}
+
+void
+Infiniband::getGid(int port, int gidIndex, ibv_gid *gid){
+    int ret= ibv_query_gid(device.ctxt, downCast<uint8_t>(port), gidIndex, gid);
+    if (ret) {
+        RAMCLOUD_LOG(ERROR, "ibv_query_gid failed on port %u, gid index %d\n", port, gidIndex);
+        throw TransportException(HERE, ret);
+    }
+}
+
+/**
+ * Obtain the infiniband "link layer protocol" of device corresponding to
+ * the provided context and port number.
+ *
+ * \param[in] port
+ *      Port on the device whose local ID we're looking up. This value
+ *      is typically 1, except on adapters with multiple physical ports.
+ * \return
+ *      The link layer protocol corresponding to the given parameters.
+ *      IBV_LINK_LAYER_INFINIBAND, IBV_LINK_LAYER_ETHERNET,
+ *      IBV_LINK_LAYER_UNSPECIFIED
+ * \throw
+ *      TransportException if the port cannot be queried.
+ */
+int
+Infiniband::getLinkLayer(int port){
+    ibv_port_attr ipa;
+    int ret = ibv_query_port(device.ctxt, downCast<uint8_t>(port), &ipa);
+    if (ret) {
+        RAMCLOUD_LOG(ERROR, "ibv_query_port failed on port %u\n", port);
+        throw TransportException(HERE, ret);
+    }
+
+    switch (ipa.link_layer) {
+        case IBV_LINK_LAYER_UNSPECIFIED:
+        case IBV_LINK_LAYER_INFINIBAND:
+            RAMCLOUD_LOG(NOTICE, "Link layer protocol is Infiniband");
+            break;
+        case IBV_LINK_LAYER_ETHERNET:
+            RAMCLOUD_LOG(NOTICE, "Link layer protocol is Ethernet");
+            break;
+        default:
+            RAMCLOUD_LOG(ERROR, "Unknown link layer protocol");
+            throw TransportException(HERE, "Unknown link layer protocol");
+    }
+
+    return  ipa.link_layer;
 }
 
 /**
@@ -469,7 +534,7 @@ Infiniband::pollCompletionQueue(ibv_cq *cq, int numEntries, ibv_wc *retWcArray)
  *
  * Somewhat confusingly, each communicating end has a QueuePair, which are
  * bound (one might say "paired", but that's even more confusing). This
- * object is somewhat analogous to a TCB in TCP. 
+ * object is somewhat analogous to a TCB in TCP.
  *
  * After this method completes, the QueuePair will be in the INIT state.
  * A later call to #plumb() will transition it into the RTS state for
@@ -484,6 +549,11 @@ Infiniband::pollCompletionQueue(ibv_cq *cq, int numEntries, ibv_wc *retWcArray)
  * \param ibPhysicalPort
  *      The physical port on the HCA we will use this QueuePair on.
  *      The default is 1, though some devices have multiple ports.
+ * \param linkLayer
+ *      The link layer protocol of HCA
+ * \param gidIndex
+ *      the global ID index, default is 0 if link layer prtocol is
+ *      ethernet. Otherwise it's -1.
  * \param srq
  *      The Verbs shared receive queue to associate this QueuePair
  *      with. All writes received will use WQEs placed on the
@@ -501,15 +571,17 @@ Infiniband::pollCompletionQueue(ibv_cq *cq, int numEntries, ibv_wc *retWcArray)
  *      Maximum number of outstanding receive work requests allowed on
  *      this QueuePair.
  * \param QKey
- *      UD Queue Pairs only. The QKey for this pair. 
+ *      UD Queue Pairs only. The QKey for this pair.
  */
 Infiniband::QueuePair::QueuePair(Infiniband& infiniband, ibv_qp_type type,
-    int ibPhysicalPort, ibv_srq *srq, ibv_cq *txcq, ibv_cq *rxcq,
+    int ibPhysicalPort, int linkLayer, int gidIndex, ibv_srq *srq, ibv_cq *txcq, ibv_cq *rxcq,
     uint32_t maxSendWr, uint32_t maxRecvWr, uint32_t QKey)
     : infiniband(infiniband),
       type(type),
       ctxt(infiniband.device.ctxt),
       ibPhysicalPort(ibPhysicalPort),
+      linkLayer(linkLayer),
+      gidIndex(gidIndex),
       pd(infiniband.pd.pd),
       srq(srq),
       qp(NULL),
@@ -517,7 +589,8 @@ Infiniband::QueuePair::QueuePair(Infiniband& infiniband, ibv_qp_type type,
       rxcq(rxcq),
       initialPsn(generateRandom() & 0xffffff),
       handshakeSin(),
-      peerLid(0)
+      peerLid(0),
+      peerGid()
 {
     snprintf(peerName, sizeof(peerName), "?unknown?");
     if (type != IBV_QPT_RC && type != IBV_QPT_UD && type != IBV_QPT_RAW_ETH)
@@ -626,11 +699,18 @@ Infiniband::QueuePair::plumb(QueuePairTuple *qpt)
     qpa.rq_psn = qpt->getPsn();
     qpa.max_dest_rd_atomic = 1;
     qpa.min_rnr_timer = 12;
-    qpa.ah_attr.is_global = 0;
     qpa.ah_attr.dlid = qpt->getLid();
     qpa.ah_attr.sl = 0;
     qpa.ah_attr.src_path_bits = 0;
     qpa.ah_attr.port_num = downCast<uint8_t>(ibPhysicalPort);
+    if (linkLayer == IBV_LINK_LAYER_ETHERNET) {
+        qpa.ah_attr.is_global = 1;
+        qpa.ah_attr.grh.hop_limit = 1;
+        qpa.ah_attr.grh.dgid = qpt->getGid();
+        qpa.ah_attr.grh.sgid_index = downCast<uint8_t>(gidIndex);
+    } else {
+        qpa.ah_attr.is_global = 0;
+    }
 
     r = ibv_modify_qp(qp, &qpa, IBV_QP_STATE |
                                 IBV_QP_AV |
@@ -674,6 +754,7 @@ Infiniband::QueuePair::plumb(QueuePairTuple *qpt)
         throw TransportException(HERE, r);
     }
     peerLid = qpt->getLid();
+    peerGid = qpt->getGid();
 
     // the queue pair should be ready to use once the client has finished
     // setting up their end.
