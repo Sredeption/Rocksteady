@@ -25,7 +25,7 @@ import os
 import re
 import subprocess
 
-__all__ = ['coordinator_port', 'default_disks', 'git_branch',
+__all__ = ['coordinator_port', 'default_disk1', 'default_disk2', 'git_branch',
            'git_ref', 'git_diff', 'hosts','obj_dir', 'obj_path',
            'local_scripts_path', 'second_backup_port', 'server_port',
            'top_path']
@@ -97,7 +97,8 @@ second_backup_port = 12248
 # Command-line argument specifying where the server should store the segment
 # replicas by default.
 # default_disks = '-f /dev/sda2,/dev/sdb2'
-default_disks = '-f /tmp/rc-backup'
+default_disk1 = '-f /tmp/rc-backup'
+default_disk2 = '-f /tmp/rc-backup'
 
 # List of machines available to use as servers or clients; see
 # common.getHosts() for more information on how to set this variable.
