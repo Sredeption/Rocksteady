@@ -64,15 +64,6 @@ OPTFLAG := -O3
 DEBUGFLAGS := -DNDEBUG -Wno-unused-variable
 endif
 
-# Starting from GCC 5.1, libstdc++ introduced a new library ABI. To maintain
-# backwards compatibility, the _GLIBCXX_USE_CXX11_ABI macro is used to select
-# whether the declarations in the library headers use the old or new ABI.
-ifeq ($(GLIBCXX_USE_CXX11_ABI),yes)
-BASECFLAGS += -D_GLIBCXX_USE_CXX11_ABI=1
-else
-BASECFLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
-endif
-
 COMFLAGS := $(BASECFLAGS) $(OPTFLAG) -fno-strict-aliasing \
 	        -MD -m$(SSE) \
 	        $(DEBUGFLAGS)
@@ -278,13 +269,13 @@ CFLAGS_BASE := $(COMFLAGS) -std=gnu11 $(INCLUDES)
 CFLAGS_SILENT := $(CFLAGS_BASE)
 CFLAGS_NOWERROR := $(CFLAGS_BASE) $(CWARNS)
 # CFLAGS := $(CFLAGS_BASE) $(CWARNS)
-CFLAGS := $(CFLAGS_BASE) -Werror $(CWARNS)
+CFLAGS := $(CFLAGS_BASE) $(CWARNS)
 
 CXXFLAGS_BASE := $(COMFLAGS) -std=c++11 $(INCLUDES)
 CXXFLAGS_SILENT := $(CXXFLAGS_BASE) $(EXTRACXXFLAGS)
 CXXFLAGS_NOWERROR := $(CXXFLAGS_BASE) $(CXXWARNS) $(EXTRACXXFLAGS)
 # CXXFLAGS := $(CXXFLAGS_BASE) $(CXXWARNS) $(EXTRACXXFLAGS) $(PERF)
-CXXFLAGS := $(CXXFLAGS_BASE) -Werror $(CXXWARNS) $(EXTRACXXFLAGS) $(PERF)
+CXXFLAGS := $(CXXFLAGS_BASE) $(CXXWARNS) $(EXTRACXXFLAGS) $(PERF)
 
 ifeq ($(COMPILER),intel)
 CXXFLAGS = $(CXXFLAGS_BASE) $(CXXWARNS)
